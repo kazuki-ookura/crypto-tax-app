@@ -1,8 +1,10 @@
 # 環境変数・APIキー
 .env
 
-# 個人の取引データ
-data/
+# 個人の取引データ（ディレクトリ構造は公開、中身は非公開）
+data/**
+!data/*/
+!data/*/.gitkeep
 
 # 生成されたCSV・Excelファイル
 *.csv
