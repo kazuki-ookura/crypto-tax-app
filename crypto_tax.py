@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 暗号資産 確定申告用 統合CSV作成スクリプト
-対象年度: 2025年（令和7年）
+使い方: python crypto_tax.py [--year 2025] [--binance|--no-binance]
 """
 
 import csv
+import glob
 import os
 import io
 import sys
@@ -20,7 +21,7 @@ from decimal import Decimal, ROUND_HALF_UP
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(SCRIPT_DIR, "data")
 OUTPUT_DIR = SCRIPT_DIR
-YEAR = 2025
+YEAR = 0  # main() で --year 引数またはデフォルト(前年)で設定される
 JST = timezone(timedelta(hours=9))
 
 # --- Binance API フラグ ---
@@ -323,7 +324,15 @@ def parse_bitflyer(rows):
 
 
 def fetch_binance_data(api_key, secret):
-    """Fetch 2025 trade/income data from Binance API"""
+    """Fetch trade/income data from Binance API for YEAR (with JSON cache)"""
+    cache_dir = os.path.join(DATA_DIR, "Binance")
+    cache_path = os.path.join(cache_dir, f"{YEAR}_records.json")
+
+    if os.path.exists(cache_path):
+        print(f"  Binanceキャッシュを読み込み: {cache_path}")
+        with open(cache_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
     records = []
     base_url = "https://api.binance.com"
 
@@ -355,9 +364,9 @@ def fetch_binance_data(api_key, secret):
             yield cur, min(cur + chunk_ms - 1, end_ms)
             cur += chunk_ms
 
-    # 2025 time range in milliseconds
-    year_start_ms = int(datetime(2025, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
-    year_end_ms = int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    # Target year time range in milliseconds
+    year_start_ms = int(datetime(YEAR, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+    year_end_ms = int(datetime(YEAR + 1, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
 
     # Get account info to find which symbols we have trades for
     print("Fetching Binance account info...")
@@ -507,7 +516,7 @@ def fetch_binance_data(api_key, secret):
                         "memo": ""
                     })
 
-    # Fetch deposit history for 2025 (max 90 days per query)
+    # Fetch deposit history (max 90 days per query)
     print("  Fetching deposit history...")
     for chunk_start, chunk_end in ms_range_chunks(year_start_ms, year_end_ms, 90):
         time.sleep(0.3)
@@ -533,7 +542,7 @@ def fetch_binance_data(api_key, secret):
                     "memo": d.get("network", "")
                 })
 
-    # Fetch withdrawal history for 2025 (max 90 days per query)
+    # Fetch withdrawal history (max 90 days per query)
     print("  Fetching withdrawal history...")
     for chunk_start, chunk_end in ms_range_chunks(year_start_ms, year_end_ms, 90):
         time.sleep(0.3)
@@ -563,7 +572,19 @@ def fetch_binance_data(api_key, secret):
                     "memo": w.get("network", "")
                 })
 
+    # Save to cache
+    os.makedirs(cache_dir, exist_ok=True)
+    with open(cache_path, "w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+    print(f"  Binanceデータをキャッシュ保存: {cache_path}")
+
     return records
+
+
+def find_csv(directory):
+    """ディレクトリ内のCSVファイルを更新日時順（新しい順）で返す。"""
+    files = glob.glob(os.path.join(directory, "*.csv"))
+    return sorted(files, key=os.path.getmtime, reverse=True)
 
 
 def read_csv_file(filepath, encoding="utf-8-sig"):
@@ -601,7 +622,7 @@ def read_bitpoint_csv(filepath):
 
 
 def parse_bitpoint(rows):
-    """Parse BitPOINT data - only 2025 staking rewards"""
+    """Parse BitPOINT data - staking rewards for YEAR"""
     records = []
     for row in rows:
         kind = row.get("取引種類", "").strip()
@@ -798,68 +819,79 @@ def parse_coincheck(rows):
 
 
 def main():
-    global FETCH_BINANCE
+    global FETCH_BINANCE, YEAR
     # .env の値を環境変数に反映（シェルで未設定の場合のみ）
     for k, v in load_env().items():
         os.environ.setdefault(k, v)
     FETCH_BINANCE = os.environ.get("FETCH_BINANCE", "1") != "0"
-    # コマンドライン引数で上書き
+    # --year: 指定なければ前年（確定申告対象年）
+    if "--year" in sys.argv:
+        idx = sys.argv.index("--year")
+        YEAR = int(sys.argv[idx + 1])
+    else:
+        YEAR = datetime.now().year - 1
+    # --binance / --no-binance
     if "--binance" in sys.argv:
         FETCH_BINANCE = True
     elif "--no-binance" in sys.argv:
         FETCH_BINANCE = False
 
+    print(f"対象年度: {YEAR}年")
     all_records = []
 
-    # 1. GMOコイン
-    print("Processing GMOコイン...")
-    gmo_path = os.path.join(DATA_DIR, "GMOコイン", "2025_trading_report.csv")
-    gmo_rows = read_csv_file(gmo_path)
-    gmo_records = parse_gmo(gmo_rows)
-    print(f"  {len(gmo_records)} records (2025)")
-    all_records.extend(gmo_records)
+    Y = str(YEAR)
+
+    def load_single_csv(name, parse_fn, encoding="utf-8-sig"):
+        """ディレクトリ内のCSVを自動検出して読み込む（1ファイル想定）"""
+        d = os.path.join(DATA_DIR, name)
+        files = find_csv(d)
+        if not files:
+            print(f"  スキップ: {d} にCSVなし")
+            return []
+        if len(files) > 1:
+            print(f"  複数CSVあり、{os.path.basename(files[0])} を使用（最終更新）")
+        path = files[0]
+        if encoding == "shift_jis":
+            rows = read_csv_sjis(path)
+        else:
+            rows = read_csv_file(path, encoding)
+        records = parse_fn(rows)
+        print(f"  {len(records)} records ({Y})  [{os.path.basename(path)}]")
+        return records
+
+    # 1. GMOCoin
+    print("Processing GMOCoin...")
+    all_records.extend(load_single_csv("GMOCoin", parse_gmo))
 
     # 2. BitLending
     print("Processing BitLending...")
-    bl_path = os.path.join(DATA_DIR, "BitLending", "BitLending.csv")
-    bl_rows = read_csv_file(bl_path)
-    bl_records = parse_bitlending(bl_rows)
-    print(f"  {len(bl_records)} records (2025)")
-    all_records.extend(bl_records)
+    all_records.extend(load_single_csv("BitLending", parse_bitlending))
 
-    # 3. PBRレンディング
-    print("Processing PBRレンディング...")
-    pbr_path = os.path.join(DATA_DIR, "PBRレンディング", "【確定申告用】取引履歴_2025-01-01_2025-12-31.csv")
-    pbr_rows = read_csv_sjis(pbr_path)
-    pbr_records = parse_pbr_lending(pbr_rows)
-    print(f"  {len(pbr_records)} records (2025)")
-    all_records.extend(pbr_records)
+    # 3. PBRLending
+    print("Processing PBRLending...")
+    all_records.extend(load_single_csv("PBRLending", parse_pbr_lending, encoding="shift_jis"))
 
     # 4. bitFlyer
     print("Processing bitFlyer...")
-    bf_path = os.path.join(DATA_DIR, "bitFlyer", "TradeHistory.csv")
-    bf_rows = read_csv_file(bf_path)
-    bf_records = parse_bitflyer(bf_rows)
-    print(f"  {len(bf_records)} records (2025)")
-    all_records.extend(bf_records)
+    all_records.extend(load_single_csv("bitFlyer", parse_bitflyer))
 
-    # 5. BitPOINT (both 2025 and 2026 files)
+    # 5. BitPOINT
     print("Processing BitPOINT...")
-    for bp_file in ["Spot_20250101_20251231.csv", "Spot_20260101_20260308.csv"]:
-        bp_path = os.path.join(DATA_DIR, "BitPOINT", bp_file)
-        if os.path.exists(bp_path):
-            bp_rows = read_bitpoint_csv(bp_path)
-            bp_records = parse_bitpoint(bp_rows)
-            print(f"  {bp_file}: {len(bp_records)} records (2025)")
-            all_records.extend(bp_records)
+    bp_dir = os.path.join(DATA_DIR, "BitPOINT")
+    bp_files = find_csv(bp_dir)
+    if not bp_files:
+        print(f"  スキップ: {bp_dir} にCSVなし")
+    else:
+        if len(bp_files) > 1:
+            print(f"  複数CSVあり、{os.path.basename(bp_files[0])} を使用（最終更新）")
+        bp_rows = read_bitpoint_csv(bp_files[0])
+        bp_records = parse_bitpoint(bp_rows)
+        print(f"  {len(bp_records)} records ({Y})  [{os.path.basename(bp_files[0])}]")
+        all_records.extend(bp_records)
 
-    # 6. コインチェック
-    print("Processing コインチェック...")
-    cc_path = os.path.join(DATA_DIR, "コインチェック", "trade_history_様式1_コインチェック株式会社_20250101-20251231_12359247_1.csv")
-    cc_rows = read_csv_file(cc_path)
-    cc_records = parse_coincheck(cc_rows)
-    print(f"  {len(cc_records)} records (2025)")
-    all_records.extend(cc_records)
+    # 6. Coincheck
+    print("Processing Coincheck...")
+    all_records.extend(load_single_csv("Coincheck", parse_coincheck))
 
     # 7. Binance
     if FETCH_BINANCE:
@@ -870,7 +902,7 @@ def main():
             secret = env.get("SECRET", "")
             if api_key and secret:
                 binance_records = fetch_binance_data(api_key, secret)
-                print(f"  {len(binance_records)} records (2025)")
+                print(f"  {len(binance_records)} records ({Y})")
                 all_records.extend(binance_records)
             else:
                 print("  No API keys found, skipping Binance")
@@ -883,7 +915,7 @@ def main():
     all_records.sort(key=lambda r: r["date"])
 
     # --- Output: Full transaction CSV ---
-    output_path = os.path.join(OUTPUT_DIR, "2025_crypto_transactions.csv")
+    output_path = os.path.join(OUTPUT_DIR, f"{YEAR}_crypto_transactions.csv")
     headers = ["日付", "取引所", "通貨", "取引分類", "取引内容", "数量", "レート(円)", "金額(円)", "手数料", "手数料(円)", "備考"]
 
     with open(output_path, "w", encoding="utf-8-sig", newline="") as f:
@@ -901,7 +933,7 @@ def main():
     print(f"    合計 {len(all_records)} 件の取引")
 
     # --- Summary: 雑所得計算 ---
-    print("\n=== 2025年 暗号資産 雑所得サマリー ===")
+    print(f"\n=== {YEAR}年 暗号資産 雑所得サマリー ===")
 
     # Category-based income summary
     income_categories = {}
@@ -922,7 +954,7 @@ def main():
         income_categories[key]["count"] += 1
 
     # Output summary CSV
-    summary_path = os.path.join(OUTPUT_DIR, "2025_crypto_summary.csv")
+    summary_path = os.path.join(OUTPUT_DIR, f"{YEAR}_crypto_summary.csv")
     with open(summary_path, "w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["取引所", "取引分類", "件数", "合計金額(円)"])

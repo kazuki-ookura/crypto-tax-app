@@ -1,19 +1,32 @@
 #!/usr/bin/env python3
 """
 国税庁「暗号資産の計算書（総平均法用）」自動記入スクリプト
-002.xlsx に2025年の取引データを記入する
+002.xlsx に指定年の取引データを記入する
+使い方: python fill_nta_excel.py [--year 2025]
 """
 import os
+import sys
 import csv
 import copy
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from collections import defaultdict
 from openpyxl import load_workbook
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(SCRIPT_DIR, "data", "国税庁エクセル", "002.xlsx")
-DST = os.path.join(SCRIPT_DIR, "2025_暗号資産の計算書.xlsx")
-TX_CSV = os.path.join(SCRIPT_DIR, "2025_crypto_transactions.csv")
+
+# --year: 指定なければ前年
+if "--year" in sys.argv:
+    idx = sys.argv.index("--year")
+    YEAR = int(sys.argv[idx + 1])
+else:
+    YEAR = datetime.now().year - 1
+
+SRC = os.path.join(SCRIPT_DIR, "data", "NTA", "002.xlsx")
+DST = os.path.join(SCRIPT_DIR, f"{YEAR}_暗号資産の計算書.xlsx")
+TX_CSV = os.path.join(SCRIPT_DIR, f"{YEAR}_crypto_transactions.csv")
+
+print(f"対象年度: {YEAR}年")
 
 # --- 1. Load and aggregate transaction data ---
 with open(TX_CSV, "r", encoding="utf-8-sig") as f:
@@ -60,7 +73,7 @@ for row in rows:
         })
 
 # Also include GMO staking deposits and campaign rewards from the raw data
-gmo_path = os.path.join(SCRIPT_DIR, "data", "GMOコイン", "2025_trading_report.csv")
+gmo_path = os.path.join(SCRIPT_DIR, "data", "GMOCoin", f"{YEAR}_trading_report.csv")
 with open(gmo_path, "r", encoding="utf-8-sig") as f:
     gmo_rows = list(csv.DictReader(f))
 
@@ -70,7 +83,7 @@ for row in gmo_rows:
     if not ds:
         continue
     dt = datetime.strptime(ds, "%Y/%m/%d %H:%M")
-    if dt.year != 2025:
+    if dt.year != YEAR:
         continue
     seisan = row.get("精算区分", "").strip()
     if seisan != "暗号資産預入・送付":
@@ -140,7 +153,7 @@ for i, cur in enumerate(currencies):
         print(f"  Section3 row{r}: {t['mo']}/{t['da']} {t['partner']} {t['desc']} buy={t['bq']}({t['ba']}円)")
 
     # Section 4: Year-start balance (N41, N42) = 0 for now
-    # User must fill in if they had pre-2025 holdings
+    # User must fill in if they had pre-YEAR holdings
     ws.cell(row=41, column=14, value=0)  # N41: year-start qty
     ws.cell(row=42, column=14, value=0)  # N42: year-start amount
     print(f"  Section4: 年始残高=0（要確認）")
@@ -171,7 +184,7 @@ thin_border = Border(
 # Title
 summary.merge_cells("A1:E1")
 c = summary["A1"]
-c.value = "2025年 暗号資産 所得サマリー"
+c.value = f"{YEAR}年 暗号資産 所得サマリー"
 c.font = title_font
 c.alignment = Alignment(horizontal="center")
 
