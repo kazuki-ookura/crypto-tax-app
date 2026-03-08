@@ -24,13 +24,13 @@ BTC, ETH, XRP, DOGE, BAT, ATOM, TRX, SOL, BNB
 ├── 2025_crypto_summary.csv        # カテゴリ別サマリー（出力）
 ├── 2025_暗号資産の計算書.xlsx      # 国税庁計算書（出力）
 └── data/
-    ├── GMOコイン/
+    ├── GMOCoin/
     ├── BitPOINT/
     ├── bitFlyer/
     ├── BitLending/
-    ├── PBRレンディング/
-    ├── コインチェック/
-    └── 国税庁エクセル/            # テンプレート (002.xlsx)
+    ├── PBRLending/
+    ├── Coincheck/
+    └── NTA/                       # テンプレート (002.xlsx)
 ```
 
 ## 使い方
@@ -49,7 +49,7 @@ python crypto_tax.py
 python fill_nta_excel.py
 ```
 
-統合CSVと国税庁テンプレート(`data/国税庁エクセル/002.xlsx`)をもとに、暗号資産ごとのシート（計算書①〜⑨）を記入した `2025_暗号資産の計算書.xlsx` を出力する。
+統合CSVと国税庁テンプレート(`data/NTA/002.xlsx`)をもとに、暗号資産ごとのシート（計算書①〜⑨）を記入した `2025_暗号資産の計算書.xlsx` を出力する。
 
 ## 注意事項
 
