@@ -1,0 +1,17 @@
+# 環境変数・APIキー
+.env
+
+# 個人の取引データ
+data/
+
+# 生成されたCSV・Excelファイル
+*.csv
+*.xlsx
+~$*.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store
