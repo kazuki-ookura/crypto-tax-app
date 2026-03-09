@@ -67,11 +67,7 @@ for row in rows:
             "mo": mo, "da": da, "partner": ex, "desc": sub,
             "bq": qty, "ba": abs(amt), "sq": Decimal(0), "sa": Decimal(0)
         })
-    elif cat == "手数料返金":
-        sec3[cur].append({
-            "mo": mo, "da": da, "partner": ex, "desc": "手数料返金",
-            "bq": Decimal(0), "ba": abs(amt), "sq": Decimal(0), "sa": Decimal(0)
-        })
+    # 手数料返金: 元の手数料は日本円受渡金額に含まれているため除外
 
 # Also include GMO staking deposits and campaign rewards from the raw data
 gmo_path = os.path.join(SCRIPT_DIR, "data", "GMOCoin", f"{YEAR}_trading_report.csv")
