@@ -8,6 +8,7 @@ import os
 import sys
 import csv
 import copy
+import calendar
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from collections import defaultdict
@@ -101,6 +102,25 @@ for row in gmo_rows:
             "bq": qty, "ba": Decimal(0),
             "sq": Decimal(0), "sa": Decimal(0)
         })
+
+# Aggregate sec3 entries by month when count exceeds 13-row limit
+for cur in sec3:
+    if len(sec3[cur]) > 13:
+        agg = defaultdict(lambda: {"bq": Decimal(0), "ba": Decimal(0), "sq": Decimal(0), "sa": Decimal(0)})
+        for t in sec3[cur]:
+            key = (t["mo"], t["partner"], t["desc"])
+            agg[key]["bq"] += t["bq"]
+            agg[key]["ba"] += t["ba"]
+            agg[key]["sq"] += t["sq"]
+            agg[key]["sa"] += t["sa"]
+        new_entries = []
+        for (mo, partner, desc), d in agg.items():
+            last_day = calendar.monthrange(YEAR, int(mo))[1]
+            new_entries.append({
+                "mo": mo, "da": str(last_day), "partner": partner, "desc": desc,
+                "bq": d["bq"], "ba": d["ba"], "sq": d["sq"], "sa": d["sa"]
+            })
+        sec3[cur] = sorted(new_entries, key=lambda t: (int(t["mo"]), int(t["da"])))
 
 # Define which currencies to fill and their sheet order
 currencies = ["BTC", "ETH", "XRP", "DOGE", "BAT", "ATOM", "TRX", "SOL", "BNB"]

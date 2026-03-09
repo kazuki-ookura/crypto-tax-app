@@ -572,6 +572,40 @@ def fetch_binance_data(api_key, secret):
                     "memo": w.get("network", "")
                 })
 
+    # Fetch daily closing prices for unpriced staking rewards
+    unpriced = [r for r in records if r.get("category") == "ステーキング報酬" and r.get("amount_jpy") == "0"]
+    if unpriced:
+        print("  Fetching daily prices for staking rewards...")
+        staking_currencies = set(r["currency"] for r in unpriced if r["currency"])
+        price_map = {}  # (currency, "YYYY-MM-DD") -> Decimal closing price
+        for currency in staking_currencies:
+            pair = f"{currency}JPY"
+            time.sleep(0.3)
+            # klines is a public endpoint; use unsigned request to avoid extra param error
+            klines_params = urllib.parse.urlencode({
+                "symbol": pair, "interval": "1d",
+                "startTime": str(year_start_ms), "endTime": str(year_end_ms), "limit": "500"
+            })
+            try:
+                with urllib.request.urlopen(f"{base_url}/api/v3/klines?{klines_params}", timeout=10) as resp:
+                    klines = json.loads(resp.read().decode())
+            except Exception as e:
+                print(f"    klines error for {pair}: {e}")
+                klines = None
+            if klines and isinstance(klines, list):
+                for k in klines:
+                    day_str = datetime.fromtimestamp(k[0] / 1000, tz=JST).strftime("%Y-%m-%d")
+                    price_map[(currency, day_str)] = Decimal(str(k[4]))  # close price (index 4)
+                print(f"    {pair}: {len(klines)}日分の価格取得")
+        for r in records:
+            if r.get("category") == "ステーキング報酬" and r.get("amount_jpy") == "0":
+                day_str = r["date"][:10]
+                price = price_map.get((r["currency"], day_str), Decimal(0))
+                if price > 0:
+                    qty = Decimal(r["quantity"])
+                    r["rate_jpy"] = str(price)
+                    r["amount_jpy"] = str((price * qty).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
+
     # Save to cache
     os.makedirs(cache_dir, exist_ok=True)
     with open(cache_path, "w", encoding="utf-8") as f:
