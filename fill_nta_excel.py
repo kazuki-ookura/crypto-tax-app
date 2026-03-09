@@ -120,17 +120,24 @@ for cur in sec3:
         sec3[cur] = sorted(new_entries, key=lambda t: (int(t["mo"]), int(t["da"])))
 
 # Detect active currencies from transaction data (sorted alphabetically)
-all_sheets = ["計算書①", "計算書②", "計算書③", "計算書④", "計算書⑤", "計算書⑥", "計算書⑦", "計算書⑧", "計算書⑨"]
-active = sorted(set(list(sec2.keys()) + list(sec3.keys())))
-if len(active) > len(all_sheets):
-    print(f"警告: 通貨数({len(active)})がシート数({len(all_sheets)})を超えています。先頭{len(all_sheets)}通貨のみ処理します。")
-    active = active[:len(all_sheets)]
-currencies = active
-sheet_names = all_sheets[:len(currencies)]
+# Unicode circled numbers ①-⑳ (U+2460-U+2473): supports up to 20 currencies
+CIRCLED_NUMS = [chr(0x2460 + i) for i in range(20)]
+
+currencies = sorted(set(list(sec2.keys()) + list(sec3.keys())))
 print(f"処理通貨: {currencies}")
 
 # --- 2. Load workbook and fill ---
 wb = load_workbook(SRC)
+template_ws = wb["計算書①"]  # コピー元テンプレート
+
+# 既存シートは計算書①〜⑨、10通貨目以降は①をコピーして追加
+sheet_names = []
+for i in range(len(currencies)):
+    name = f"計算書{CIRCLED_NUMS[i]}"
+    if name not in wb.sheetnames:
+        new_ws = wb.copy_worksheet(template_ws)
+        new_ws.title = name
+    sheet_names.append(name)
 
 for i, cur in enumerate(currencies):
     ws = wb[sheet_names[i]]
