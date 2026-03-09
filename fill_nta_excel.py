@@ -69,12 +69,13 @@ for row in rows:
         })
     # 手数料返金: 元の手数料は日本円受渡金額に含まれているため除外
 
-# Also include GMO staking deposits and campaign rewards from the raw data
+# Also include GMO staking deposits and campaign rewards from the raw data (optional)
 gmo_path = os.path.join(SCRIPT_DIR, "data", "GMOCoin", f"{YEAR}_trading_report.csv")
-with open(gmo_path, "r", encoding="utf-8-sig") as f:
-    gmo_rows = list(csv.DictReader(f))
+gmo_rows = []
+if os.path.exists(gmo_path):
+    with open(gmo_path, "r", encoding="utf-8-sig") as f:
+        gmo_rows = list(csv.DictReader(f))
 
-from datetime import datetime
 for row in gmo_rows:
     ds = row.get("日時", "").strip()
     if not ds:
@@ -118,9 +119,15 @@ for cur in sec3:
             })
         sec3[cur] = sorted(new_entries, key=lambda t: (int(t["mo"]), int(t["da"])))
 
-# Define which currencies to fill and their sheet order
-currencies = ["BTC", "ETH", "XRP", "DOGE", "BAT", "ATOM", "TRX", "SOL", "BNB"]
-sheet_names = ["計算書①", "計算書②", "計算書③", "計算書④", "計算書⑤", "計算書⑥", "計算書⑦", "計算書⑧", "計算書⑨"]
+# Detect active currencies from transaction data (sorted alphabetically)
+all_sheets = ["計算書①", "計算書②", "計算書③", "計算書④", "計算書⑤", "計算書⑥", "計算書⑦", "計算書⑧", "計算書⑨"]
+active = sorted(set(list(sec2.keys()) + list(sec3.keys())))
+if len(active) > len(all_sheets):
+    print(f"警告: 通貨数({len(active)})がシート数({len(all_sheets)})を超えています。先頭{len(all_sheets)}通貨のみ処理します。")
+    active = active[:len(all_sheets)]
+currencies = active
+sheet_names = all_sheets[:len(currencies)]
+print(f"処理通貨: {currencies}")
 
 # --- 2. Load workbook and fill ---
 wb = load_workbook(SRC)
